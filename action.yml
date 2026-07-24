@@ -2,22 +2,38 @@ name: 'Switchyard Router'
 description: >-
   Run the NVIDIA NeMo Switchyard router in your job to auto-route AI tasks
   between strong/weak models, with per-run routing stats saved as artifacts.
-  Client-agnostic: anything that speaks the OpenAI or Anthropic API can use it.
+  Client-agnostic and provider-agnostic: any OpenAI-compatible upstream works.
 author: 'shuntaka9576'
 branding:
   icon: 'shuffle'
   color: 'green'
 
 inputs:
-  fireworks-api-key:
-    description: 'Fireworks API key (passed only into the router container)'
+  api-key:
+    description: 'API key for the upstream provider (passed only into the router container)'
     required: true
+  base-url:
+    description: 'OpenAI-compatible base URL of the upstream provider'
+    required: false
+    default: 'https://api.fireworks.ai/inference/v1'
+  strong-model:
+    description: 'Model id for the strong tier'
+    required: false
+    default: 'accounts/fireworks/models/deepseek-v4-pro'
+  weak-model:
+    description: 'Model id for the weak tier'
+    required: false
+    default: 'accounts/fireworks/models/deepseek-v4-flash'
+  classifier-model:
+    description: 'Model id for the routing classifier (defaults to weak-model)'
+    required: false
+    default: ''
   task-label:
     description: 'Task label recorded on every routing record, for aggregation and misroute analysis'
     required: false
     default: ''
   route-config:
-    description: 'Path to a route.yaml overriding the default bundled in the image'
+    description: 'Path to a route.yaml that replaces the generated route bundle entirely (escape hatch)'
     required: false
     default: ''
   image:

@@ -2,7 +2,7 @@
 
 Run the [NVIDIA NeMo Switchyard](https://github.com/NVIDIA-NeMo/Switchyard) router (based on [switchyard-opencode-bundle](https://github.com/himorishige/switchyard-opencode-bundle)) inside GitHub Actions. AI tasks in CI are automatically routed between deepseek-v4-pro (strong) and deepseek-v4-flash (weak), and per-run routing stats are saved as workflow artifacts.
 
-The action is client-agnostic. It starts the router, hands you an OpenAI-compatible `base-url`, and collects stats in a post step — anything that speaks the OpenAI or Anthropic API (opencode, Claude Code, codex, pr-agent, plain curl) can sit on top.
+The action is client-agnostic and provider-agnostic. It starts the router, hands you an OpenAI-compatible `base-url`, and collects stats in a post step — anything that speaks the OpenAI or Anthropic API (opencode, Claude Code, codex, pr-agent, plain curl) can sit on top. The upstream defaults to Fireworks with the deepseek pro/flash pair, but any OpenAI-compatible provider works via the `base-url` / `strong-model` / `weak-model` inputs, and a custom `route-config` replaces the routing config entirely.
 
 > **Status: experimental.**
 
@@ -54,7 +54,7 @@ jobs:
       - uses: shuntaka9576/switchyard-action@main
         id: router
         with:
-          fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
+          api-key: ${{ secrets.FIREWORKS_API_KEY }}
           task-label: pr-review
 
       - uses: anomalyco/opencode/github@latest
@@ -121,13 +121,34 @@ Point whatever you run at `steps.router.outputs.base-url` with any API key value
             -d '{"model":"auto","messages":[{"role":"user","content":"..."}]}'
 ```
 
+## Other providers
+
+Any OpenAI-compatible upstream works — point the router at it and name the two tiers.
+
+```yaml
+      - uses: shuntaka9576/switchyard-action@main
+        with:
+          api-key: ${{ secrets.TOGETHER_API_KEY }}
+          base-url: https://api.together.xyz/v1
+          strong-model: deepseek-ai/DeepSeek-V4
+          weak-model: deepseek-ai/DeepSeek-V4-Lite
+```
+
+The action templates a two-tier route bundle (auto classifier + per-conversation pinning, plus `strong-only` / `weak-only` escape hatches) from these inputs. For anything the template cannot express — three tiers, mixed providers, Anthropic-format upstreams — pass a full `route.yaml` via `route-config`; it replaces the generated bundle entirely. In a custom `route.yaml`, reference the key as `${UPSTREAM_API_KEY}` (`${FIREWORKS_API_KEY}` also works as an alias).
+
+One caveat: the bundled image patches the classifier's reasoning-suppression hint for OpenAI-style providers (`reasoning_effort: "none"`). If your upstream expects the vLLM-style `chat_template_kwargs` hint instead, tune `extra_body` in a custom `route-config`.
+
 ## Inputs
 
 | Name | Required | Default | Description |
 |------|----------|---------|-------------|
-| `fireworks-api-key` | ✓ | — | Fireworks API key (passed only into the router container) |
+| `api-key` | ✓ | — | API key for the upstream provider (passed only into the router container) |
+| `base-url` | | Fireworks | OpenAI-compatible base URL of the upstream provider |
+| `strong-model` | | `deepseek-v4-pro` | Model id for the strong tier |
+| `weak-model` | | `deepseek-v4-flash` | Model id for the weak tier |
+| `classifier-model` | | = `weak-model` | Model id for the routing classifier |
 | `task-label` | | `""` | Task label recorded on every routing record, for aggregation and misroute analysis |
-| `route-config` | | — | Path to a `route.yaml` overriding the default bundled in the image |
+| `route-config` | | — | Path to a `route.yaml` that replaces the generated route bundle entirely |
 | `image` | | `ghcr.io/shuntaka9576/switchyard:latest` | Router container image |
 | `port` | | `4100` | Host port for the router (loopback only) |
 | `extra-docker-args` | | `""` | Extra arguments appended to `docker run` |

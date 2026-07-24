@@ -4,15 +4,21 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
       - name: Build router image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
         with:
           context: docker
           load: true
@@ -26,13 +32,17 @@ jobs:
           sleep 1
           curl -sf http://127.0.0.1:9999/health
 
+      # Exercises the generated-route path: no route-config, the route
+      # bundle is templated from base-url / strong-model / weak-model.
       - name: Run switchyard-action
         id: router
         uses: ./
         with:
-          fireworks-api-key: dummy-e2e-key
+          api-key: dummy-e2e-key
           image: switchyard:e2e
-          route-config: test/route-ci.yaml
+          base-url: http://host.docker.internal:9999/v1
+          strong-model: mock/deepseek-v4-pro
+          weak-model: mock/deepseek-v4-flash
           extra-docker-args: --add-host=host.docker.internal:host-gateway
           task-label: e2e
 
@@ -41,21 +51,13 @@ jobs:
           BASE: ${{ steps.router.outputs.base-url }}
         run: |
           set -x
-          curl -sf -X POST "$BASE/chat/completions" \
-            -H 'content-type: application/json' \
-            -H 'authorization: Bearer local-dummy' \
-            -d '{"model":"weak-only","messages":[{"role":"user","content":"ping"}]}' \
-            | tee /tmp/weak.json | jq -e '.usage.total_tokens > 0'
-          curl -sf -X POST "$BASE/chat/completions" \
-            -H 'content-type: application/json' \
-            -H 'authorization: Bearer local-dummy' \
-            -d '{"model":"strong-only","messages":[{"role":"user","content":"ping"}]}' \
-            | jq -e '.usage.total_tokens > 0'
-          curl -sf -X POST "$BASE/chat/completions" \
-            -H 'content-type: application/json' \
-            -H 'authorization: Bearer local-dummy' \
-            -d '{"model":"auto","messages":[{"role":"user","content":"say ok"}]}' \
-            | jq -e '.usage.total_tokens > 0'
+          for model in weak-only strong-only auto; do
+            curl -sf -X POST "$BASE/chat/completions" \
+              -H 'content-type: application/json' \
+              -H 'authorization: Bearer local-dummy' \
+              -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}" \
+              | jq -e '.usage.total_tokens > 0'
+          done
 
       - name: Check routing stats endpoint
         run: |
@@ -66,17 +68,21 @@ jobs:
   verify-artifact:
     needs: e2e
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           pattern: switchyard-stats-*
           merge-multiple: true
       - name: Assert normalized records exist
+        env:
+          REPO: ${{ github.repository }}
         run: |
           ls -la
           test -s routing.jsonl
           jq -se 'length >= 3' routing.jsonl
-          jq -se 'all(.[]; .repo == "${{ github.repository }}" and .task_label == "e2e" and .total_tokens > 0)' routing.jsonl
+          jq -se --arg repo "$REPO" 'all(.[]; .repo == $repo and .task_label == "e2e" and .total_tokens > 0)' routing.jsonl
           echo "--- records ---"
           cat routing.jsonl
           echo "--- stats ---"

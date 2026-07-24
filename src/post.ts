@@ -32,10 +32,17 @@ function routeKey(r: RoutingRecord): string {
   return `pinned:${model.split('/').pop()}`
 }
 
-function isStrong(key: string): boolean {
-  if (key === 'strong') return true
-  if (key === 'weak') return false
-  return key.includes('pro') // pinned:deepseek-v4-pro
+function makeIsStrong(strongModel: string, weakModel: string): (r: RoutingRecord) => boolean {
+  const strongTail = strongModel.split('/').pop() ?? strongModel
+  const weakTail = weakModel.split('/').pop() ?? weakModel
+  return (r) => {
+    if (r.tier === 'strong') return true
+    if (r.tier === 'weak') return false
+    const model = r.model ?? ''
+    if (model === strongModel || model.split('/').pop() === strongTail) return true
+    if (model === weakModel || model.split('/').pop() === weakTail) return false
+    return model.includes('pro') // last-resort heuristic
+  }
 }
 
 async function run(): Promise<void> {
@@ -47,6 +54,7 @@ async function run(): Promise<void> {
   const taskLabel = core.getState('task-label')
   const priceStrong = Number(core.getState('price-strong') || '1.05')
   const priceWeak = Number(core.getState('price-weak') || '0.15')
+  const isStrong = makeIsStrong(core.getState('strong-model'), core.getState('weak-model'))
 
   const outDir = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), 'switchyard-stats-'))
 
@@ -102,24 +110,22 @@ async function run(): Promise<void> {
 
   // 4. Aggregate for summary/outputs.
   const perRoute = new Map<string, { requests: number; tokens: number }>()
+  let strongReqs = 0
+  let weakReqs = 0
+  let strongTokens = 0
+  let weakTokens = 0
   for (const r of records) {
     const key = routeKey(r)
     const agg = perRoute.get(key) ?? { requests: 0, tokens: 0 }
     agg.requests += 1
     agg.tokens += r.total_tokens ?? 0
     perRoute.set(key, agg)
-  }
-  let strongReqs = 0
-  let weakReqs = 0
-  let strongTokens = 0
-  let weakTokens = 0
-  for (const [key, agg] of perRoute) {
-    if (isStrong(key)) {
-      strongReqs += agg.requests
-      strongTokens += agg.tokens
+    if (isStrong(r)) {
+      strongReqs += 1
+      strongTokens += r.total_tokens ?? 0
     } else {
-      weakReqs += agg.requests
-      weakTokens += agg.tokens
+      weakReqs += 1
+      weakTokens += r.total_tokens ?? 0
     }
   }
   const totalTokens = strongTokens + weakTokens
