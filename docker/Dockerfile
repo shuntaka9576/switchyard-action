@@ -55,9 +55,9 @@ ENV PATH="/opt/venv/bin:${PATH}"
 RUN useradd --create-home switchyard
 WORKDIR /app
 
-# Baked-in default config; override per repository via the action's
-# `route-config` input (read-only bind mount).
-COPY route.yaml /app/route.yaml
+# No route bundle is baked in — the image is provider-neutral. Bind-mount
+# a route bundle at /app/route.yaml (switchyard-action generates and
+# mounts one automatically from its inputs).
 RUN mkdir -p /app/logs && chown switchyard:switchyard /app/logs
 USER switchyard
 
@@ -69,4 +69,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 # Route-bundle mode with the per-request JSONL log. Intake sink stays
 # disabled: request bodies never leave the container except toward the
 # configured endpoints.
-CMD ["switchyard", "--routing-profiles", "/app/route.yaml", "serve", "--host", "0.0.0.0", "--port", "4100", "--routing-log-file", "/app/logs/routing.jsonl"]
+CMD ["sh", "-c", "test -f /app/route.yaml || { echo 'error: no route bundle found. Bind-mount one at /app/route.yaml (switchyard-action does this automatically).' >&2; exit 1; }; exec switchyard --routing-profiles /app/route.yaml serve --host 0.0.0.0 --port 4100 --routing-log-file /app/logs/routing.jsonl"]
