@@ -1,6 +1,6 @@
 # switchyard-action
 
-Run the [NVIDIA NeMo Switchyard](https://github.com/NVIDIA-NeMo/Switchyard) router (based on [switchyard-opencode-bundle](https://github.com/himorishige/switchyard-opencode-bundle)) inside GitHub Actions. AI tasks in CI are automatically routed between deepseek-v4-pro (strong) and deepseek-v4-flash (weak), and per-run routing stats are saved as workflow artifacts.
+Run the [NVIDIA NeMo Switchyard](https://github.com/NVIDIA-NeMo/Switchyard) router (based on [switchyard-opencode-bundle](https://github.com/himorishige/switchyard-opencode-bundle)) inside GitHub Actions. AI tasks in CI are automatically routed between a strong and a weak model (deepseek-v4-pro / deepseek-v4-flash on Fireworks by default), and per-run routing stats are saved as workflow artifacts.
 
 The action is client-agnostic and provider-agnostic. It starts the router, hands you an OpenAI-compatible `base-url`, and collects stats in a post step — anything that speaks the OpenAI or Anthropic API (opencode, Claude Code, codex, pr-agent, plain curl) can sit on top. The upstream defaults to Fireworks with the deepseek pro/flash pair, but any OpenAI-compatible provider works via the `base-url` / `strong-model` / `weak-model` inputs, and a custom `route-config` replaces the routing config entirely.
 
@@ -15,6 +15,12 @@ The action is client-agnostic and provider-agnostic. It starts the router, hands
 The post step renders the routing breakdown on the run page like this.
 
 ![Step Summary showing per-route requests, tokens, estimated cost and savings](docs/images/step-summary.png)
+
+How to read it.
+
+- `strong` / `weak` — requests that went through the `auto` route and were classified into the expensive tier (`strong-model`) or the cheap tier (`weak-model`)
+- `pinned:<model>` — requests that bypassed classification via a pinned route (`strong-only` / `weak-only`); opencode's `small_model` auxiliary calls typically land here
+- No `strong` row means nothing escalated to the expensive tier in this run. The savings line quantifies exactly that: the gap between actual cost and the "everything on the strong model" counterfactual. If `strong` stays near zero across many runs, that is data telling you the weak model alone may be enough for this workload
 
 ## Quick start — inline PR review with opencode
 
