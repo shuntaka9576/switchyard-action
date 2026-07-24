@@ -12,6 +12,10 @@ The action is client-agnostic. It starts the router, hands you an OpenAI-compati
 - **Per-run cost visibility** — a post step collects routing stats automatically (even when the job fails) and renders a per-route table (requests, tokens, estimated cost, estimated savings) in the run's Step Summary
 - **Artifacts for aggregation** — normalized routing logs (JSONL) are uploaded as `switchyard-stats-<run_id>-<job>`, so you can fetch everything later and aggregate locally, including feeding the rollup to an LLM
 
+The post step renders the routing breakdown on the run page like this.
+
+![Step Summary showing per-route requests, tokens, estimated cost and savings](docs/images/step-summary.png)
+
 ## Quick start — inline PR review with opencode
 
 The workflow below posts a native GitHub pull request review with line-anchored inline comments, routed through Switchyard. You need a `FIREWORKS_API_KEY` repository secret; `use_github_token: 'true'` lets the opencode action work without installing the opencode GitHub App.
