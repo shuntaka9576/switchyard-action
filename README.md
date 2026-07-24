@@ -12,22 +12,41 @@ The action is client-agnostic. It starts the router, hands you an OpenAI-compati
 - **Per-run cost visibility** — a post step collects routing stats automatically (even when the job fails) and renders a per-route table (requests, tokens, estimated cost, estimated savings) in the run's Step Summary
 - **Artifacts for aggregation** — normalized routing logs (JSONL) are uploaded as `switchyard-stats-<run_id>-<job>`, so you can fetch everything later and aggregate locally, including feeding the rollup to an LLM
 
-## Quick start (with opencode)
+## Quick start — inline PR review with opencode
 
-You need the opencode GitHub Action installed (`opencode github install`) and a `FIREWORKS_API_KEY` repository secret. Wire opencode to the router by passing the provider config yourself — either commit an `opencode.json` to the repository, or pass it inline as `OPENCODE_CONFIG_CONTENT`.
+The workflow below posts a native GitHub pull request review with line-anchored inline comments, routed through Switchyard. You need a `FIREWORKS_API_KEY` repository secret; `use_github_token: 'true'` lets the opencode action work without installing the opencode GitHub App.
 
 ```yaml
-# .github/workflows/opencode.yml
+# .github/workflows/ai-review.yml
 name: AI Review
 on:
-  issue_comment:
-    types: [created]
   pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   ai-review:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Insurance: if the agent ever leaves the worktree dirty, opencode's
+      # auto-commit must not fail on a missing git identity (its error
+      # output would leak into the PR progress comment).
+      - name: Set git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - uses: shuntaka9576/switchyard-action@main
         id: router
         with:
@@ -36,10 +55,12 @@ jobs:
 
       - uses: anomalyco/opencode/github@latest
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENCODE_CONFIG_CONTENT: |
             {
               "$schema": "https://opencode.ai/config.json",
               "share": "disabled",
+              "autoupdate": false,
               "provider": {
                 "switchyard": {
                   "npm": "@ai-sdk/openai-compatible",
@@ -59,11 +80,29 @@ jobs:
             }
         with:
           model: switchyard/auto
+          use_github_token: 'true'
+          prompt: |
+            Review the diff of pull request #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+
+            Publish your findings as a native GitHub pull request review with line-anchored inline comments. Do NOT post your findings as a plain issue comment.
+
+            Never modify, commit, or push any file inside the repository checkout. Work files go to /tmp only.
+
+            Follow these steps exactly:
+            1. Run `gh pr diff ${{ github.event.pull_request.number }}` to read the diff. Note the exact file paths and the line numbers on the NEW side of the diff for every finding.
+            2. Write /tmp/review.json shaped like this (one entry in "comments" per finding, anchored to the exact changed line the finding refers to):
+               {"event":"COMMENT","body":"<one-paragraph overall summary>","comments":[{"path":"<file path>","line":<new-side line number>,"side":"RIGHT","body":"<finding with a concrete fix suggestion>"}]}
+            3. Post it with: `gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews --input /tmp/review.json`
+            4. Verify the review was created by checking the exit code and the response JSON.
 ```
 
-The router validates no API key (`local-dummy` is fine); the real Fireworks key exists only inside the router container. Pick the tier per task with the model name — `switchyard/auto`, `switchyard/strong-only`, or `switchyard/weak-only`.
+Notes on the moving parts.
 
-The router binds to loopback, so the AI task must run in the **same job** as this action.
+- The router validates no API key (`local-dummy` is fine); the real Fireworks key exists only inside the router container
+- Pick the tier per task with the model name — `switchyard/auto`, `switchyard/strong-only`, or `switchyard/weak-only`
+- Without the `prompt`, opencode's default PR review is a single long issue comment rather than an inline review
+- The router binds to loopback, so the AI task must run in the **same job** as this action
+- An agentic review run takes on the order of minutes; `concurrency` above cancels superseded runs when the PR gets new pushes
 
 ## Using any other client
 
