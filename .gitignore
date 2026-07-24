@@ -1,0 +1,6 @@
+node_modules/
+collected/
+summary.json
+*.tsbuildinfo
+__pycache__/
+DESIGN.md

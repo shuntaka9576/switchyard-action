@@ -1,0 +1,83 @@
+name: E2E
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+      - name: Build router image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          load: true
+          tags: switchyard:e2e
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start mock upstream
+        run: |
+          nohup python3 test/mock_llm.py 9999 > mock.log 2>&1 &
+          sleep 1
+          curl -sf http://127.0.0.1:9999/health
+
+      - name: Run switchyard-action
+        id: router
+        uses: ./
+        with:
+          fireworks-api-key: dummy-e2e-key
+          image: switchyard:e2e
+          route-config: test/route-ci.yaml
+          extra-docker-args: --add-host=host.docker.internal:host-gateway
+          task-label: e2e
+
+      - name: Exercise router (weak-only / strong-only / auto)
+        env:
+          BASE: ${{ steps.router.outputs.base-url }}
+        run: |
+          set -x
+          curl -sf -X POST "$BASE/chat/completions" \
+            -H 'content-type: application/json' \
+            -H 'authorization: Bearer local-dummy' \
+            -d '{"model":"weak-only","messages":[{"role":"user","content":"ping"}]}' \
+            | tee /tmp/weak.json | jq -e '.usage.total_tokens > 0'
+          curl -sf -X POST "$BASE/chat/completions" \
+            -H 'content-type: application/json' \
+            -H 'authorization: Bearer local-dummy' \
+            -d '{"model":"strong-only","messages":[{"role":"user","content":"ping"}]}' \
+            | jq -e '.usage.total_tokens > 0'
+          curl -sf -X POST "$BASE/chat/completions" \
+            -H 'content-type: application/json' \
+            -H 'authorization: Bearer local-dummy' \
+            -d '{"model":"auto","messages":[{"role":"user","content":"say ok"}]}' \
+            | jq -e '.usage.total_tokens > 0'
+
+      - name: Check routing stats endpoint
+        run: |
+          curl -sf http://127.0.0.1:4100/v1/routing/stats | tee /tmp/stats.json
+          echo
+          cat mock.log
+
+  verify-artifact:
+    needs: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: switchyard-stats-*
+          merge-multiple: true
+      - name: Assert normalized records exist
+        run: |
+          ls -la
+          test -s routing.jsonl
+          jq -se 'length >= 3' routing.jsonl
+          jq -se 'all(.[]; .repo == "${{ github.repository }}" and .task_label == "e2e" and .total_tokens > 0)' routing.jsonl
+          echo "--- records ---"
+          cat routing.jsonl
+          echo "--- stats ---"
+          cat stats.json

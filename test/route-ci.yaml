@@ -1,0 +1,32 @@
+# E2E route bundle: same shape as docker/route.yaml, but every target
+# points at the mock upstream on the runner host instead of Fireworks.
+# Model ids keep the pro/flash suffixes so tier detection in the post
+# step aggregation behaves like production.
+
+defaults:
+  api_key: ${FIREWORKS_API_KEY}
+  base_url: http://host.docker.internal:9999/v1
+  format: openai
+  extra_body: {}
+
+routes:
+  auto:
+    type: deterministic
+    profile: coding_agent
+    classifier:
+      model: mock/deepseek-v4-flash
+    strong:
+      model: mock/deepseek-v4-pro
+    weak:
+      model: mock/deepseek-v4-flash
+    fallback_target_on_evict: strong
+    session_affinity: true
+    affinity_warmup_turns: 2
+
+  strong-only:
+    type: model
+    target: mock/deepseek-v4-pro
+
+  weak-only:
+    type: model
+    target: mock/deepseek-v4-flash
