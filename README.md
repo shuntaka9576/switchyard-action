@@ -46,6 +46,7 @@ concurrency:
 jobs:
   ai-review:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,13 +100,14 @@ jobs:
 
             Publish your findings as a native GitHub pull request review with line-anchored inline comments. Do NOT post your findings as a plain issue comment.
 
-            Never modify, commit, or push any file inside the repository checkout. Work files go to /tmp only.
+            Never modify, commit, or push any file. Do not create files anywhere — not in the checkout, not in /tmp.
 
             Follow these steps exactly:
             1. Run `gh pr diff ${{ github.event.pull_request.number }}` to read the diff. Note the exact file paths and the line numbers on the NEW side of the diff for every finding.
-            2. Write /tmp/review.json shaped like this (one entry in "comments" per finding, anchored to the exact changed line the finding refers to):
+            2. Compose the review JSON in this shape (one entry in "comments" per finding, anchored to the exact changed line the finding refers to):
                {"event":"COMMENT","body":"<one-paragraph overall summary>","comments":[{"path":"<file path>","line":<new-side line number>,"side":"RIGHT","body":"<finding with a concrete fix suggestion>"}]}
-            3. Post it with: `gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews --input /tmp/review.json`
+            3. Post it in a single command, passing the JSON via stdin (no file involved):
+               printf '%s' '<the JSON>' | gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews --input -
             4. Verify the review was created by checking the exit code and the response JSON.
 ```
 
@@ -115,7 +117,7 @@ Notes on the moving parts.
 - Pick the tier per task with the model name — `switchyard/auto`, `switchyard/strong-only`, or `switchyard/weak-only`
 - Without the `prompt`, opencode's default PR review is a single long issue comment rather than an inline review
 - The router binds to loopback, so the AI task must run in the **same job** as this action
-- An agentic review run takes on the order of minutes; `concurrency` above cancels superseded runs when the PR gets new pushes
+- An agentic review run takes on the order of minutes; `concurrency` cancels superseded runs and `timeout-minutes` caps a stuck agent (the opencode action is referenced as `@latest`, a moving tag — a behavior change upstream once caused an indefinite permission-prompt hang)
 
 ## Using any other client
 
