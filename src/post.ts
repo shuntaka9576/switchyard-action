@@ -32,15 +32,15 @@ function routeKey(r: RoutingRecord): string {
   return `pinned:${model.split('/').pop()}`
 }
 
-function makeIsStrong(strongModel: string, weakModel: string): (r: RoutingRecord) => boolean {
-  const strongTail = strongModel.split('/').pop() ?? strongModel
-  const weakTail = weakModel.split('/').pop() ?? weakModel
+function makeIsStrong(strongModels: string[], weakModels: string[]): (r: RoutingRecord) => boolean {
+  const strong = new Set(strongModels)
+  const weak = new Set(weakModels)
   return (r) => {
     if (r.tier === 'strong') return true
     if (r.tier === 'weak') return false
     const model = r.model ?? ''
-    if (model === strongModel || model.split('/').pop() === strongTail) return true
-    if (model === weakModel || model.split('/').pop() === weakTail) return false
+    if (strong.has(model)) return true
+    if (weak.has(model)) return false
     return model.includes('pro') // last-resort heuristic
   }
 }
@@ -50,11 +50,14 @@ async function run(): Promise<void> {
     core.info('router was never started; nothing to collect')
     return
   }
-  const port = Number(core.getState('port') || '4100')
-  const taskLabel = core.getState('task-label')
-  const priceStrong = Number(core.getState('price-strong') || '1.05')
-  const priceWeak = Number(core.getState('price-weak') || '0.15')
-  const isStrong = makeIsStrong(core.getState('strong-model'), core.getState('weak-model'))
+  const port = 4100
+  const priceStrong = Number(core.getState('price-strong'))
+  const priceWeak = Number(core.getState('price-weak'))
+  const hasPrices = priceStrong > 0 && priceWeak > 0
+  const isStrong = makeIsStrong(
+    JSON.parse(core.getState('strong-models') || '[]'),
+    JSON.parse(core.getState('weak-models') || '[]'),
+  )
 
   const outDir = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), 'switchyard-stats-'))
 
@@ -93,7 +96,6 @@ async function run(): Promise<void> {
     job: process.env.GITHUB_JOB ?? '',
     pr: prNumber(),
     actor: process.env.GITHUB_ACTOR ?? '',
-    task_label: taskLabel,
     collected_at: new Date().toISOString(),
   }
   const records: RoutingRecord[] = []
@@ -136,8 +138,10 @@ async function run(): Promise<void> {
   core.setOutput('strong-requests', String(strongReqs))
   core.setOutput('weak-requests', String(weakReqs))
   core.setOutput('total-tokens', String(totalTokens))
-  core.setOutput('estimated-cost-usd', cost.toFixed(4))
-  core.setOutput('estimated-savings-usd', savings.toFixed(4))
+  if (hasPrices) {
+    core.setOutput('estimated-cost-usd', cost.toFixed(4))
+    core.setOutput('estimated-savings-usd', savings.toFixed(4))
+  }
 
   // 5. Step Summary.
   const summary = core.summary.addHeading('Switchyard routing stats', 3)
@@ -159,10 +163,12 @@ async function run(): Promise<void> {
         agg.tokens.toLocaleString('en-US'),
       ]),
     ])
-    summary.addRaw(
-      `Estimated cost: $${cost.toFixed(4)} — estimated savings vs pro-only: $${savings.toFixed(4)} ` +
-        `(prices: strong $${priceStrong}/Mtok, weak $${priceWeak}/Mtok; total_tokens-based approximation)`,
-    )
+    if (hasPrices) {
+      summary.addRaw(
+        `Estimated cost: $${cost.toFixed(4)} — estimated savings vs strong-only: $${savings.toFixed(4)} ` +
+          `(prices: strong $${priceStrong}/Mtok, weak $${priceWeak}/Mtok; total_tokens-based approximation)`,
+      )
+    }
   }
   await summary.write()
 

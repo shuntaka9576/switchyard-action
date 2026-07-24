@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Aggregate normalized switchyard routing logs fetched by collect.sh.
 
-Deterministic rollup of collected/**/routing.jsonl by repo / task_label /
+Deterministic rollup of collected/**/routing.jsonl by repo / workflow /
 route, with cost estimation against scripts/prices.yaml. Writes summary.json
 and prints a table. With --ai-report, sends the rollup (never the raw log)
 to an OpenAI-compatible endpoint for a written report.
 
 Environment for --ai-report:
-  REPORT_MODEL_BASE_URL  e.g. https://api.fireworks.ai/inference/v1
-  REPORT_MODEL           e.g. accounts/fireworks/models/deepseek-v4-pro
-  REPORT_MODEL_API_KEY   defaults to $FIREWORKS_API_KEY
+  REPORT_MODEL_BASE_URL  your provider's OpenAI-compatible endpoint
+  REPORT_MODEL           model id to generate the report with
+  REPORT_MODEL_API_KEY   API key for that endpoint
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ def aggregate(records: list[dict], prices: dict[str, float]) -> dict:
         by_repo[repo]["requests"] += 1
         by_repo[repo]["tokens"] += tokens
 
-        label = rec.get("task_label") or "(none)"
+        label = rec.get("workflow") or "(none)"
         by_label[label]["requests"] += 1
         by_label[label]["tokens"] += tokens
 
@@ -106,7 +106,7 @@ def aggregate(records: list[dict], prices: dict[str, float]) -> dict:
         "prices_per_mtok": prices,
         "by_route": dict(sorted(by_route.items(), key=lambda kv: -kv[1]["requests"])),
         "by_repo": dict(sorted(by_repo.items(), key=lambda kv: -kv[1]["tokens"])),
-        "by_task_label": dict(sorted(by_label.items(), key=lambda kv: -kv[1]["tokens"])),
+        "by_workflow": dict(sorted(by_label.items(), key=lambda kv: -kv[1]["tokens"])),
     }
 
 
@@ -144,14 +144,14 @@ def ai_report(summary: dict, anomaly_list: list[dict]) -> str:
     model = os.environ.get("REPORT_MODEL")
     if not base_url or not model:
         sys.exit("--ai-report requires REPORT_MODEL_BASE_URL and REPORT_MODEL")
-    api_key = os.environ.get("REPORT_MODEL_API_KEY") or os.environ.get("FIREWORKS_API_KEY") or "dummy"
+    api_key = os.environ.get("REPORT_MODEL_API_KEY") or "dummy"
 
     prompt = (
         "あなたは LLM ルーティングのコスト分析者です。以下は CI 上の Switchyard "
-        "ルーター(strong=deepseek-v4-pro / weak=deepseek-v4-flash)の集計値と、"
+        "ルーター(strong/weak の2階層)の集計値と、"
         "weak に振られたのにトークン数が大きい異常候補です。日本語で簡潔な "
         "Markdown レポートを書いてください。構成: ハイライト(コスト・削減額・"
-        "auto の strong 比率) / repo・task_label 別の気づき / 誤ルート疑いの指摘 / "
+        "auto の strong 比率) / repo・workflow 別の気づき / 誤ルート疑いの指摘 / "
         "推奨アクション。数値の再計算はせず、与えられた数値だけを使うこと。\n\n"
         f"## summary\n{json.dumps(summary, ensure_ascii=False, indent=2)}\n\n"
         f"## anomalies (top {len(anomaly_list)})\n"

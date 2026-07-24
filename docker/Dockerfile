@@ -26,16 +26,16 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
     pip install \
     "nemo-switchyard[server] @ https://github.com/NVIDIA-NeMo/Switchyard/archive/${SWITCHYARD_SHA}.tar.gz"
 
-# Fireworks rejects the vLLM-only `chat_template_kwargs` reasoning hint with
-# HTTP 400; swap the classifier's injected body for the OpenAI-style
-# `reasoning_effort: "none"`. Same patch as switchyard-opencode-bundle; the
-# greps make a silent upstream change fail the build instead.
+# Some OpenAI-compatible SaaS providers reject the vLLM-only
+# `chat_template_kwargs` reasoning hint with HTTP 400; swap the classifier's
+# injected body for the OpenAI-style `reasoning_effort: "none"`. Patch
+# inherited from switchyard-opencode-bundle; the greps make a silent
+# upstream change fail the build instead.
 RUN RP="$(python -c 'import switchyard.lib.processors.llm_classifier.request_processor as m; print(m.__file__)')" \
     && grep -q 'extra_body = {"chat_template_kwargs": {"enable_thinking": False}}' "$RP" \
     && sed -i 's/extra_body = {"chat_template_kwargs": {"enable_thinking": False}}/extra_body = {"reasoning_effort": "none"}/' "$RP" \
     && grep -q 'extra_body = {"reasoning_effort": "none"}' "$RP" \
-    && python -c "import switchyard.lib.processors.llm_classifier.request_processor" \
-    && python -c "from switchyard.lib.processors.reasoning_hint import model_accepts_reasoning_hint as f; assert f('accounts/fireworks/models/deepseek-v4-flash')"
+    && python -c "import switchyard.lib.processors.llm_classifier.request_processor"
 
 # The venv only needs to run, not to install: drop installer tooling and
 # bytecode caches (bytecode regenerates in memory at import time).

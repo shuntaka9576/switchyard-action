@@ -1,10 +1,10 @@
-# E2E route bundle: same shape as docker/route.yaml, but every target
-# points at the mock upstream on the runner host instead of Fireworks.
+# E2E route bundle: same shape as examples/route.fireworks.yaml, but every target
+# points at the mock upstream on the runner host instead of a real provider.
 # Model ids keep the pro/flash suffixes so tier detection in the post
 # step aggregation behaves like production.
 
 defaults:
-  api_key: ${FIREWORKS_API_KEY}
+  api_key: ${UPSTREAM_API_KEY}
   base_url: http://host.docker.internal:9999/v1
   format: openai
   extra_body: {}

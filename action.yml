@@ -1,65 +1,37 @@
 name: 'Switchyard Router'
 description: >-
   Run the NVIDIA NeMo Switchyard router in your job to auto-route AI tasks
-  between strong/weak models, with per-run routing stats saved as artifacts.
-  Client-agnostic and provider-agnostic: any OpenAI-compatible upstream works.
+  between model tiers you define in a route bundle, with per-run routing
+  stats saved as artifacts. Client-agnostic and provider-agnostic.
 author: 'shuntaka9576'
 branding:
   icon: 'shuffle'
   color: 'green'
 
 inputs:
-  api-key:
-    description: 'API key for the upstream provider (passed only into the router container)'
-    required: true
-  base-url:
-    description: 'OpenAI-compatible base URL of the upstream provider'
-    required: false
-    default: 'https://api.fireworks.ai/inference/v1'
-  strong-model:
-    description: 'Model id for the strong tier'
-    required: false
-    default: 'accounts/fireworks/models/deepseek-v4-pro'
-  weak-model:
-    description: 'Model id for the weak tier'
-    required: false
-    default: 'accounts/fireworks/models/deepseek-v4-flash'
-  classifier-model:
-    description: 'Model id for the routing classifier (defaults to weak-model)'
-    required: false
-    default: ''
-  task-label:
-    description: 'Task label recorded on every routing record, for aggregation and misroute analysis'
-    required: false
-    default: ''
   route-config:
-    description: 'Path to a route.yaml that replaces the generated route bundle entirely (escape hatch)'
-    required: false
-    default: ''
+    description: 'Path to the Switchyard route bundle (route.yaml) defining providers, models, and routes. Set the env vars its api_key entries reference via env: on this step. See examples/.'
+    required: true
   image:
     description: 'Router container image'
     required: false
     default: 'ghcr.io/shuntaka9576/switchyard:latest'
-  port:
-    description: 'Host port for the router (loopback only)'
-    required: false
-    default: '4100'
   extra-docker-args:
     description: 'Extra whitespace-separated arguments appended to docker run (e.g. --add-host=host.docker.internal:host-gateway)'
     required: false
     default: ''
   price-strong-per-mtok:
-    description: 'USD per 1M tokens for the strong model, used for cost estimation'
+    description: 'USD per 1M tokens for the strong tier. Set both prices to enable cost estimation; omitted, no cost is shown.'
     required: false
-    default: '1.05'
+    default: ''
   price-weak-per-mtok:
-    description: 'USD per 1M tokens for the weak model, used for cost estimation'
+    description: 'USD per 1M tokens for the weak tier. Set both prices to enable cost estimation; omitted, no cost is shown.'
     required: false
-    default: '0.15'
+    default: ''
 
 outputs:
   base-url:
-    description: 'Router endpoint (http://127.0.0.1:<port>/v1)'
+    description: 'Router endpoint (http://127.0.0.1:4100/v1)'
   strong-requests:
     description: 'Requests routed to the strong tier (set by the post step; informational)'
   weak-requests:
@@ -67,9 +39,9 @@ outputs:
   total-tokens:
     description: 'Total tokens across all routed requests (set by the post step; informational)'
   estimated-cost-usd:
-    description: 'Estimated cost in USD (set by the post step; informational)'
+    description: 'Estimated cost in USD (set by the post step when both price inputs are provided)'
   estimated-savings-usd:
-    description: 'Estimated savings vs strong-only in USD (set by the post step; informational)'
+    description: 'Estimated savings vs strong-only in USD (set by the post step when both price inputs are provided)'
 
 runs:
   using: 'node24'

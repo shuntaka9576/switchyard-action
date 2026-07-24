@@ -32,19 +32,15 @@ jobs:
           sleep 1
           curl -sf http://127.0.0.1:9999/health
 
-      # Exercises the generated-route path: no route-config, the route
-      # bundle is templated from base-url / strong-model / weak-model.
       - name: Run switchyard-action
         id: router
         uses: ./
+        env:
+          UPSTREAM_API_KEY: dummy-e2e-key
         with:
-          api-key: dummy-e2e-key
           image: switchyard:e2e
-          base-url: http://host.docker.internal:9999/v1
-          strong-model: mock/deepseek-v4-pro
-          weak-model: mock/deepseek-v4-flash
+          route-config: test/route-ci.yaml
           extra-docker-args: --add-host=host.docker.internal:host-gateway
-          task-label: e2e
 
       - name: Exercise router (weak-only / strong-only / auto)
         env:
@@ -82,7 +78,7 @@ jobs:
           ls -la
           test -s routing.jsonl
           jq -se 'length >= 3' routing.jsonl
-          jq -se --arg repo "$REPO" 'all(.[]; .repo == $repo and .task_label == "e2e" and .total_tokens > 0)' routing.jsonl
+          jq -se --arg repo "$REPO" 'all(.[]; .repo == $repo and .workflow == "E2E" and .total_tokens > 0)' routing.jsonl
           echo "--- records ---"
           cat routing.jsonl
           echo "--- stats ---"

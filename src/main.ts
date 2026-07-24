@@ -1,37 +1,28 @@
 import * as fs from 'node:fs'
-import * as os from 'node:os'
-import * as path from 'node:path'
 import * as core from '@actions/core'
 import { exec, getExecOutput } from '@actions/exec'
-import { CONTAINER_NAME, baseUrl, generateRouteBundle, waitForHealth } from './lib'
+import { CONTAINER_NAME, analyzeRouteBundle, baseUrl, waitForHealth } from './lib'
 
 async function run(): Promise<void> {
-  const apiKey = core.getInput('api-key', { required: true })
-  core.setSecret(apiKey)
+  const routeConfig = core.getInput('route-config', { required: true })
+  const routeFile = fs.realpathSync(routeConfig)
+  const bundle = analyzeRouteBundle(fs.readFileSync(routeFile, 'utf8'))
+
+  // The bundle references its credentials as ${VAR}; forward exactly those
+  // variables from the step environment into the container. Fail fast when
+  // one is missing instead of letting upstream calls 401 later.
+  for (const name of bundle.apiKeyEnvNames) {
+    if (!process.env[name]) {
+      throw new Error(
+        `route bundle references \${${name}} but it is not set — add it via env: on this step`,
+      )
+    }
+  }
+  if (bundle.apiKeyEnvNames.length > 0) {
+    core.info(`forwarding env into the router container: ${bundle.apiKeyEnvNames.join(', ')}`)
+  }
 
   const image = core.getInput('image')
-  const port = Number(core.getInput('port') || '4100')
-  const routeConfig = core.getInput('route-config')
-  const strongModel = core.getInput('strong-model')
-  const weakModel = core.getInput('weak-model')
-
-  // route-config replaces the generated bundle entirely (escape hatch for
-  // three-tier setups, mixed providers, Anthropic-format upstreams, ...).
-  let routeFile: string
-  if (routeConfig) {
-    routeFile = fs.realpathSync(routeConfig)
-  } else {
-    routeFile = path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), 'switchyard-route.yaml')
-    fs.writeFileSync(
-      routeFile,
-      generateRouteBundle({
-        upstreamBaseUrl: core.getInput('base-url'),
-        strongModel,
-        weakModel,
-        classifierModel: core.getInput('classifier-model') || weakModel,
-      }),
-    )
-  }
 
   const args = [
     'run',
@@ -39,47 +30,34 @@ async function run(): Promise<void> {
     '--name',
     CONTAINER_NAME,
     '-p',
-    `127.0.0.1:${port}:4100`,
-    // Value-less form: docker reads the keys from the exec environment, so
-    // they never appear in the command line or the step log.
-    // FIREWORKS_API_KEY is kept as an alias for route-config files written
-    // against the upstream bundle's variable name.
-    '-e',
-    'UPSTREAM_API_KEY',
-    '-e',
-    'FIREWORKS_API_KEY',
+    '127.0.0.1:4100:4100',
+    // Value-less -e form: docker reads the values from the inherited
+    // environment, so secrets never appear in the command line or logs.
+    ...bundle.apiKeyEnvNames.flatMap((name) => ['-e', name]),
     '-v',
     `${routeFile}:/app/route.yaml:ro`,
   ]
   const extraArgs = core.getInput('extra-docker-args').split(/\s+/).filter(Boolean)
   args.push(...extraArgs, image)
 
-  await exec('docker', args, {
-    env: {
-      ...(process.env as Record<string, string>),
-      UPSTREAM_API_KEY: apiKey,
-      FIREWORKS_API_KEY: apiKey,
-    },
-  })
+  await exec('docker', args)
 
   try {
-    await waitForHealth(port, 60_000)
+    await waitForHealth(4100, 60_000)
   } catch (e) {
     const logs = await getExecOutput('docker', ['logs', CONTAINER_NAME], { ignoreReturnCode: true })
     core.info(`--- docker logs ${CONTAINER_NAME} ---\n${logs.stdout}\n${logs.stderr}`)
     throw e
   }
-  core.info(`Switchyard router is healthy on ${baseUrl(port)}`)
+  core.info(`Switchyard router is healthy on ${baseUrl(4100)}`)
 
-  core.setOutput('base-url', baseUrl(port))
+  core.setOutput('base-url', baseUrl(4100))
 
   // State for the post step. Everything flows through state so post never
   // reads inputs (inputs are unavailable to post on some failure paths).
   core.saveState('started', 'true')
-  core.saveState('port', String(port))
-  core.saveState('task-label', core.getInput('task-label'))
-  core.saveState('strong-model', strongModel)
-  core.saveState('weak-model', weakModel)
+  core.saveState('strong-models', JSON.stringify(bundle.strongModels))
+  core.saveState('weak-models', JSON.stringify(bundle.weakModels))
   core.saveState('price-strong', core.getInput('price-strong-per-mtok'))
   core.saveState('price-weak', core.getInput('price-weak-per-mtok'))
 }
